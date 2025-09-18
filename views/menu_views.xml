@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Menú principal -->
+    <menuitem id="menu_bank_import_main"
+              name="Importación Bancaria"
+              parent="account.menu_finance"
+              sequence="10"/>
+
+    <!-- Submenú para importaciones -->
+    <menuitem id="menu_bank_import"
+              name="Importaciones"
+              parent="menu_bank_import_main"
+              action="action_bank_import"
+              sequence="10"/>
+
+    <!-- Submenú para pagos emparejados -->
+    <menuitem id="menu_bank_import_matches"
+              name="Pagos Emparejados"
+              parent="menu_bank_import_main"
+              action="action_bank_import_match"
+              sequence="20"/>
+
+</odoo>

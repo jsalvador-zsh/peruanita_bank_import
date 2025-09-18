@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Vista de formulario para bank.import -->
+    <record id="view_bank_import_form" model="ir.ui.view">
+        <field name="name">bank.import.form</field>
+        <field name="model">bank.import</field>
+        <field name="arch" type="xml">
+            <form string="Importación Bancaria">
+                <header>
+                    <button name="action_process_file" type="object" string="Procesar Archivo" 
+                            class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_match_payments" type="object" string="Buscar Coincidencias" 
+                            class="btn-primary" invisible="state == 'draft'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,processed,matched"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="bank_type"/>
+                            <field name="file_name"/>
+                            <field name="file_type" readonly="1"/>
+                            <field name="import_date"/>
+                        </group>
+                        <group>
+                            <field name="total_operations"/>
+                            <field name="matched_operations"/>
+                            <field name="unmatched_operations"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="file_data" filename="file_name"/>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Operaciones Importadas" invisible="state == 'draft'">
+                            <field name="line_ids">
+                                <list decoration-success="is_matched" decoration-muted="not is_matched">
+                                    <field name="transaction_date"/>
+                                    <field name="operation_number"/>
+                                    <field name="description"/>
+                                    <field name="amount"/>
+                                    <field name="is_matched"/>
+                                </list>
+                            </field>
+                        </page>
+                        
+                        <page string="Pagos Emparejados" invisible="state == 'draft'">
+                            <field name="matched_payment_ids">
+                                <list>
+                                    <field name="transaction_date"/>
+                                    <field name="operation_number"/>
+                                    <field name="amount"/>
+                                    <field name="payment_amount"/>
+                                    <field name="partner_name"/>
+                                    <field name="payment_reference"/>
+                                    <field name="payment_memo"/>
+                                    <field name="match_type"/>
+                                </list>
+                            </field>
+                            <div class="alert alert-info" role="alert" invisible="matched_payment_ids">
+                                <strong>Sin coincidencias encontradas</strong><br/>
+                                Haga clic en "Buscar Coincidencias" para buscar pagos que coincidan con las operaciones importadas.
+                            </div>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vista de árbol para bank.import -->
+    <record id="view_bank_import_list" model="ir.ui.view">
+        <field name="name">bank.import.list</field>
+        <field name="model">bank.import</field>
+        <field name="arch" type="xml">
+            <list string="Importaciones Bancarias" decoration-info="state == 'draft'" 
+                  decoration-success="state == 'matched'" decoration-warning="state == 'processed'">
+                <field name="name"/>
+                <field name="bank_type"/>
+                <field name="file_type"/>
+                <field name="import_date"/>
+                <field name="total_operations"/>
+                <field name="matched_operations"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vista de búsqueda para bank.import -->
+    <record id="view_bank_import_search" model="ir.ui.view">
+        <field name="name">bank.import.search</field>
+        <field name="model">bank.import</field>
+        <field name="arch" type="xml">
+            <search string="Buscar Importaciones">
+                <field name="name"/>
+                <field name="bank_type"/>
+                <field name="file_type"/>
+                <separator/>
+                <filter string="Borradores" name="draft" domain="[('state', '=', 'draft')]"/>
+                <filter string="Procesadas" name="processed" domain="[('state', '=', 'processed')]"/>
+                <filter string="Emparejadas" name="matched" domain="[('state', '=', 'matched')]"/>
+                <separator/>
+                <group expand="0" string="Agrupar por">
+                    <filter string="Banco" name="bank_type" domain="[]" context="{'group_by': 'bank_type'}"/>
+                    <filter string="Estado" name="state" domain="[]" context="{'group_by': 'state'}"/>
+                    <filter string="Fecha" name="import_date" domain="[]" context="{'group_by': 'import_date'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Acción para bank.import -->
+    <record id="action_bank_import" model="ir.actions.act_window">
+        <field name="name">Importaciones Bancarias</field>
+        <field name="res_model">bank.import</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_bank_import_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                ¡Crea tu primera importación bancaria!
+            </p>
+            <p>
+                Importa archivos TXT o Excel de tus operaciones bancarias
+                y encuentra automáticamente los pagos correspondientes en tu sistema.
+            </p>
+        </field>
+    </record>
+
+    <!-- Vista de formulario para bank.import.line -->
+    <record id="view_bank_import_line_form" model="ir.ui.view">
+        <field name="name">bank.import.line.form</field>
+        <field name="model">bank.import.line</field>
+        <field name="arch" type="xml">
+            <form string="Línea de Importación">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="transaction_date"/>
+                            <field name="operation_number"/>
+                            <field name="amount"/>
+                        </group>
+                        <group>
+                            <field name="description"/>
+                            <field name="is_matched"/>
+                        </group>
+                    </group>
+                    <group string="Datos Originales">
+                        <field name="original_line" readonly="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vista de formulario para bank.import.match -->
+    <record id="view_bank_import_match_form" model="ir.ui.view">
+        <field name="name">bank.import.match.form</field>
+        <field name="model">bank.import.match</field>
+        <field name="arch" type="xml">
+            <form string="Emparejamiento de Pago">
+                <sheet>
+                    <group>
+                        <group string="Operación Bancaria">
+                            <field name="transaction_date"/>
+                            <field name="operation_number"/>
+                            <field name="amount"/>
+                        </group>
+                        <group string="Pago en Sistema">
+                            <field name="payment_id"/>
+                            <field name="payment_amount"/>
+                            <field name="partner_name"/>
+                            <field name="payment_reference"/>
+                            <field name="payment_memo"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="match_type"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción para ver todos los emparejamientos -->
+    <record id="action_bank_import_match" model="ir.actions.act_window">
+        <field name="name">Pagos Emparejados</field>
+        <field name="res_model">bank.import.match</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No hay pagos emparejados aún.
+            </p>
+            <p>
+                Los pagos emparejados aparecerán aquí después de procesar
+                las importaciones bancarias.
+            </p>
+        </field>
+    </record>
+
+</odoo>

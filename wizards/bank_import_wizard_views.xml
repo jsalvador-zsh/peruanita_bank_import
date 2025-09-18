@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    
+    <!-- Vista del wizard de importación avanzada -->
+    <record id="view_bank_import_wizard_form" model="ir.ui.view">
+        <field name="name">bank.import.wizard.form</field>
+        <field name="model">bank.import.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Búsqueda Avanzada de Coincidencias">
+                <sheet>
+                    <group>
+                        <group string="Filtros de Fecha">
+                            <field name="date_from"/>
+                            <field name="date_to"/>
+                        </group>
+                        <group string="Criterios de Coincidencia">
+                            <field name="amount_tolerance"/>
+                        </group>
+                    </group>
+                    <group string="Campos de Búsqueda del Número de Operación">
+                        <div class="row">
+                            <div class="col-4">
+                                <field name="search_in_reference"/>
+                                <label for="search_in_reference" string="Número/Nombre del Pago"/>
+                            </div>
+                            <div class="col-4">
+                                <field name="search_in_communication"/>
+                                <label for="search_in_communication" string="Comunicación"/>
+                            </div>
+                            <div class="col-4">
+                                <field name="search_in_narration"/>
+                                <label for="search_in_narration" string="Memo/Narración"/>
+                            </div>
+                        </div>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_advanced_match" type="object" string="Buscar Coincidencias" class="btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción del wizard -->
+    <record id="action_bank_import_wizard" model="ir.actions.act_window">
+        <field name="name">Búsqueda Avanzada</field>
+        <field name="res_model">bank.import.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="view_id" ref="view_bank_import_wizard_form"/>
+    </record>
+
+</odoo>

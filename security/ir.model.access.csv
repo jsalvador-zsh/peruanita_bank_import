@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_bank_import_user,bank.import.user,model_bank_import,account.group_account_user,1,1,1,1
+access_bank_import_manager,bank.import.manager,model_bank_import,account.group_account_manager,1,1,1,1
+access_bank_import_line_user,bank.import.line.user,model_bank_import_line,account.group_account_user,1,1,1,1
+access_bank_import_line_manager,bank.import.line.manager,model_bank_import_line,account.group_account_manager,1,1,1,1
+access_bank_import_match_user,bank.import.match.user,model_bank_import_match,account.group_account_user,1,1,1,1
+access_bank_import_match_manager,bank.import.match.manager,model_bank_import_match,account.group_account_manager,1,1,1,1
