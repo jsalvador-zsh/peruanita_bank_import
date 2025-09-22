@@ -1,9 +1,8 @@
 import base64
-import csv
 import io
 from datetime import datetime
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import UserError
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -14,7 +13,7 @@ class BankImport(models.Model):
     _description = 'Importación de Operaciones Bancarias'
     _order = 'create_date desc'
 
-    name = fields.Char('Nombre', required=True, default=lambda self: _('Nueva Importación'))
+    name = fields.Char('Nombre', required=True, default=lambda: _('Nueva Importación'))
     file_data = fields.Binary('Archivo', required=True)
     file_name = fields.Char('Nombre del Archivo')
     file_type = fields.Selection([
@@ -428,8 +427,8 @@ class BankImport(models.Model):
                     if isinstance(date_value, datetime):
                         transaction_date = date_value.date()
                     elif isinstance(date_value, str):
-                        # Intentar varios formatos de fecha, incluyendo el formato con puntos
-                        for fmt in ['%Y.%m.%d', '%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y']:
+                        # Intentar varios formatos de fecha
+                        for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y']:
                             try:
                                 transaction_date = datetime.strptime(str(date_value).strip(), fmt).date()
                                 break
@@ -453,47 +452,52 @@ class BankImport(models.Model):
                 description = str(desc_value) if desc_value else ''
                 _logger.info(f"Descripción: {description}")
             
-            # Procesar montos - Banco de la Nación tiene columnas separadas para Cargo y Abono
+            # Monto
             amount = 0.0
-            
-            # Procesar cargo (débito - monto negativo)
+            if 'amount' in col_mapping:
+                amount_value = get_value(col_mapping['amount'])
+                _logger.info(f"Valor monto crudo: {amount_value} (tipo: {type(amount_value)})")
+                
+                if amount_value:
+                    try:
+                        # Limpiar formato de monto
+                        amount_str = str(amount_value).replace(',', '').replace(' ', '').strip()
+                        amount = float(amount_str)
+                    except:
+                        amount = 0.0
+
+                _logger.info(f"Monto procesado: {amount}")
+
+            # Manejar columnas separadas de cargo y abono
             if 'cargo' in col_mapping:
                 cargo_value = get_value(col_mapping['cargo'])
-                _logger.info(f"Valor cargo crudo: {cargo_value}")
-                
-                if cargo_value and str(cargo_value).strip():
+                if cargo_value:
                     try:
-                        # Limpiar formato de monto
-                        cargo_str = str(cargo_value).replace(',', '').replace('$', '').strip()
-                        if cargo_str and cargo_str != '':
-                            cargo_amount = float(cargo_str)
-                            amount = -abs(cargo_amount)  # Los cargos son negativos
-                            _logger.info(f"Cargo procesado: {amount}")
+                        cargo_str = str(cargo_value).replace(',', '').replace(' ', '').strip()
+                        cargo_amount = float(cargo_str)
+                        if cargo_amount > 0:
+                            amount = -cargo_amount  # Cargo es negativo
                     except:
                         pass
-            
-            # Procesar abono (crédito - monto positivo)
-            if 'abono' in col_mapping and amount == 0.0:  # Solo si no hay cargo
+
+            if 'abono' in col_mapping:
                 abono_value = get_value(col_mapping['abono'])
-                _logger.info(f"Valor abono crudo: {abono_value}")
-                
-                if abono_value and str(abono_value).strip():
+                if abono_value:
                     try:
-                        # Limpiar formato de monto
-                        abono_str = str(abono_value).replace(',', '').replace('$', '').strip()
-                        if abono_str and abono_str != '':
-                            amount = float(abono_str)  # Los abonos son positivos
-                            _logger.info(f"Abono procesado: {amount}")
+                        abono_str = str(abono_value).replace(',', '').replace(' ', '').strip()
+                        abono_amount = float(abono_str)
+                        if abono_amount > 0:
+                            amount = abono_amount  # Abono es positivo
                     except:
                         pass
-            
-            # Número de operación/documento
+
+            # Número de operación
             operation_number = ''
             if 'operation' in col_mapping:
                 op_value = get_value(col_mapping['operation'])
                 operation_number = str(op_value) if op_value else ''
                 _logger.info(f"Número de operación: {operation_number}")
-            
+
             # Crear línea si tenemos datos mínimos
             if transaction_date or amount != 0 or operation_number:
                 line_vals = {
@@ -504,13 +508,13 @@ class BankImport(models.Model):
                     'operation_number': operation_number,
                     'original_line': f"Excel row: {str(row)}"
                 }
-                
+
                 _logger.info(f"Creando línea con valores: {line_vals}")
                 new_line = self.env['bank.import.line'].create(line_vals)
                 _logger.info(f"Línea creada exitosamente: ID {new_line.id}")
             else:
                 _logger.warning("Fila descartada: no contiene datos suficientes")
-                
+
         except Exception as e:
             _logger.error(f"Error creando línea Excel: {str(e)}")
             _logger.error(f"Datos de la fila: {row}")
@@ -574,7 +578,7 @@ class BankImport(models.Model):
                     'sticky': True,
                 }
             }
-            
+
         except Exception as e:
             _logger.error(f"Error en debug: {str(e)}")
             raise UserError(_('Error analizando archivo: %s') % str(e))
@@ -583,12 +587,12 @@ class BankImport(models.Model):
         """Buscar pagos que coincidan con las operaciones importadas"""
         if not self.line_ids:
             raise UserError(_('Debe procesar el archivo primero.'))
-        
+
         _logger.info(f"Iniciando búsqueda de matches para importación {self.id}")
-        
+
         # Limpiar matches anteriores
         self.matched_payment_ids.unlink()
-        
+
         total_matches = 0
         for line in self.line_ids:
             try:
@@ -597,10 +601,10 @@ class BankImport(models.Model):
             except Exception as e:
                 _logger.error(f"Error procesando línea {line.id}: {str(e)}")
                 raise UserError(_('Error procesando línea de operación %s: %s') % (line.operation_number, str(e)))
-        
+
         self.state = 'matched'
         _logger.info(f"Búsqueda completada. Total matches encontrados: {total_matches}")
-        
+
         # Retornar True para que se refresque la vista automáticamente
         return True
 
@@ -735,9 +739,10 @@ class BankImport(models.Model):
                     if operation_number == last_6_digits or clean_operation == last_6_digits.lstrip('0'):
                         _logger.info(f"Coincidencia BCP por últimos 6 dígitos: {operation_number} == {last_6_digits}")
                         return True
-        
+
         # Si no hay coincidencia exacta, permitir match solo por monto
         return False
+
 
 class BankImportLine(models.Model):
     _name = 'bank.import.line'
@@ -770,7 +775,7 @@ class BankImportMatch(models.Model):
         ('exact', 'Exacto'),
         ('partial', 'Parcial')
     ], string='Tipo de Coincidencia', default='exact')
-    
+
     # Campos relacionados para mostrar información
     transaction_date = fields.Date(related='import_line_id.transaction_date', store=True)
     operation_number = fields.Char(related='import_line_id.operation_number', store=True)
@@ -790,5 +795,5 @@ class BankImportMatch(models.Model):
             raise UserError(_('El campo "Pago" es obligatorio.'))
         if not vals.get('import_id'):
             raise UserError(_('El campo "Importación" es obligatorio.'))
-            
+
         return super().create(vals)
