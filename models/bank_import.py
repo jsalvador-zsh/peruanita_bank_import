@@ -25,6 +25,7 @@ class BankImport(models.Model):
     bank_type = fields.Selection([
         ('bcp', 'Banco de Crédito del Perú'),
         ('nacion', 'Banco de la Nación'),
+        ('continental', 'Banco Continental (BBVA)'),
         ('other', 'Otro Banco')
     ], string='Banco', required=True, default='bcp')
     
@@ -242,7 +243,18 @@ class BankImport(models.Model):
                     import xlrd
                     _logger.info("Intentando procesar con xlrd...")
                     workbook = xlrd.open_workbook(file_contents=file_content)
-                    sheet = workbook.sheet_by_index(0)
+                    
+                    # Para Continental, buscar la hoja Sheet6 específicamente
+                    if self.bank_type == 'continental':
+                        sheet = None
+                        for sheet_name in workbook.sheet_names():
+                            if 'Sheet6' in sheet_name:
+                                sheet = workbook.sheet_by_name(sheet_name)
+                                break
+                        if not sheet:
+                            sheet = workbook.sheet_by_index(0)
+                    else:
+                        sheet = workbook.sheet_by_index(0)
                     _logger.info(f"Archivo Excel procesado con xlrd. Hoja: {sheet.name}, Filas: {sheet.nrows}, Columnas: {sheet.ncols}")
                     
                     if sheet.nrows < 2:
@@ -273,6 +285,10 @@ class BankImport(models.Model):
         """Parsear Excel con openpyxl"""
         _logger.info("Iniciando parseado con openpyxl...")
         
+        # Para Banco Continental, usar lógica específica
+        if self.bank_type == 'continental':
+            return self._parse_continental_excel_openpyxl(sheet)
+
         # Buscar header row
         header_row = None
         for row_num in range(1, min(10, sheet.max_row + 1)):
@@ -321,6 +337,11 @@ class BankImport(models.Model):
         """Parsear Excel con xlrd"""
         _logger.info("Iniciando parseado con xlrd...")
         
+        # Para Banco Continental, usar lógica específica
+        if self.bank_type == 'continental':
+            return self._parse_continental_excel_xlrd(sheet)
+        
+        # Lógica original para otros bancos (Banco de la Nación)
         # Buscar header row
         header_row = None
         for row_num in range(min(10, sheet.nrows)):
@@ -738,6 +759,180 @@ class BankImport(models.Model):
         
         # Si no hay coincidencia exacta, permitir match solo por monto
         return False
+
+    def _parse_continental_excel_openpyxl(self, sheet):
+        """Parsear Excel Continental con openpyxl"""
+        _logger.info("Procesando Continental con openpyxl...")
+        
+        # Buscar la fila de headers
+        header_row = None
+        for row_num in range(1, min(5, sheet.max_row + 1)):
+            row = sheet[row_num]
+            row_str = ' '.join([str(cell.value) for cell in row if cell.value]).upper()
+            if 'FECHA OPER' in row_str and 'CARGO' in row_str:
+                header_row = row_num
+                _logger.info(f"Header Continental encontrado en fila {row_num}")
+                break
+        
+        if header_row is None:
+            raise UserError(_('No se encontró el formato de Banco Continental. Verifique las columnas FECHA OPER., N OPER., CARGO/ABONO.'))
+        
+        # Obtener headers y mapear columnas
+        headers = [str(cell.value) if cell.value else '' for cell in sheet[header_row]]
+        _logger.info(f"Headers Continental: {headers}")
+        
+        # Mapear columnas específicas del Continental
+        col_mapping = {}
+        for i, header in enumerate(headers):
+            header_str = str(header).upper().strip()
+            if 'FECHA OPER' in header_str:
+                col_mapping['fecha'] = i
+            elif 'DESCRIPCI' in header_str or 'DESCRIPCIӎ' in header_str:
+                col_mapping['descripcion'] = i
+            elif 'N OPER' in header_str:
+                col_mapping['operacion'] = i
+            elif 'CARGO/ABONO' in header_str:
+                col_mapping['monto'] = i
+        
+        _logger.info(f"Mapeo Continental openpyxl: {col_mapping}")
+        
+        if not all(key in col_mapping for key in ['fecha', 'monto']):
+            raise UserError(_('No se encontraron las columnas necesarias en el archivo Continental.'))
+        
+        # Procesar transacciones
+        lines_created = 0
+        for row_num in range(header_row + 1, sheet.max_row + 1):
+            row = sheet[row_num]
+            if not any(cell.value for cell in row):
+                continue
+            
+            try:
+                # Saltar "SALDO ANTERIOR"
+                if col_mapping.get('descripcion'):
+                    desc_cell = row[col_mapping['descripcion']]
+                    desc = str(desc_cell.value).strip().upper() if desc_cell.value else ''
+                    if 'SALDO ANTERIOR' in desc:
+                        continue
+                
+                # Procesar fecha
+                fecha_cell = row[col_mapping['fecha']] if col_mapping.get('fecha') else None
+                fecha_str = str(fecha_cell.value).strip() if fecha_cell and fecha_cell.value else ''
+                transaction_date = self._parse_continental_date(fecha_str)
+                
+                # Procesar descripción
+                desc_cell = row[col_mapping['descripcion']] if col_mapping.get('descripcion') else None
+                description = str(desc_cell.value).strip() if desc_cell and desc_cell.value else ''
+                
+                # Procesar monto
+                monto_cell = row[col_mapping['monto']] if col_mapping.get('monto') else None
+                monto_str = str(monto_cell.value).strip() if monto_cell and monto_cell.value else '0'
+                amount = self._parse_continental_amount(monto_str)
+                
+                # Procesar número de operación
+                op_cell = row[col_mapping['operacion']] if col_mapping.get('operacion') else None
+                operation_number = str(op_cell.value).strip() if op_cell and op_cell.value else ''
+                
+                # Solo crear si tenemos datos válidos
+                if (transaction_date or amount != 0 or operation_number) and description:
+                    line_vals = {
+                        'import_id': self.id,
+                        'transaction_date': transaction_date or fields.Date.today(),
+                        'description': description,
+                        'amount': amount,
+                        'operation_number': operation_number,
+                        'original_line': f"Continental: {fecha_str} | {description} | {monto_str} | {operation_number}"
+                    }
+                    
+                    self.env['bank.import.line'].create(line_vals)
+                    lines_created += 1
+                    _logger.info(f"Continental openpyxl creada: {description[:30]}... - {amount} - Op: {operation_number}")
+                    
+            except Exception as e:
+                _logger.warning(f"Error procesando fila Continental openpyxl {row_num}: {str(e)}")
+        
+        _logger.info(f"Se crearon {lines_created} líneas desde Continental openpyxl")
+        
+        if lines_created == 0:
+            raise UserError(_('No se pudieron extraer transacciones válidas del archivo Continental.'))
+
+    def _split_continental_column(self, column_data):
+        """Dividir datos de columna del Continental por saltos de línea"""
+        if not column_data:
+            return []
+        return [item.strip() for item in str(column_data).split('\n') if item.strip()]
+
+    def _parse_continental_date(self, date_str):
+        """Parsear fecha del formato Continental (DD-MM)"""
+        if not date_str or str(date_str).strip() == '':
+            return None
+        
+        try:
+            date_str = str(date_str).strip()
+            current_year = datetime.now().year
+            
+            _logger.info(f"Parseando fecha Continental: '{date_str}'")
+            
+            # Si la fecha está en formato DD-MM (como 27-08), agregar año actual
+            if '-' in date_str:
+                parts = date_str.split('-')
+                if len(parts) == 2:
+                    day_str, month_str = parts
+                    day = day_str.strip()
+                    month = month_str.strip()
+                    
+                    # Validar que son números
+                    if day.isdigit() and month.isdigit():
+                        day_int = int(day)
+                        month_int = int(month)
+                        
+                        # Validar rangos
+                        if 1 <= day_int <= 31 and 1 <= month_int <= 12:
+                            # Si estamos en enero-febrero y la fecha es noviembre-diciembre, usar año anterior
+                            if datetime.now().month <= 2 and month_int >= 11:
+                                current_year -= 1
+                            
+                            result = datetime(current_year, month_int, day_int).date()
+                            _logger.info(f"Fecha parseada: {date_str} -> {result}")
+                            return result
+            
+            # Si no es formato DD-MM, intentar otros formatos
+            for fmt in ['%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d']:
+                try:
+                    result = datetime.strptime(date_str, fmt).date()
+                    _logger.info(f"Fecha parseada con formato {fmt}: {date_str} -> {result}")
+                    return result
+                except:
+                    continue
+                    
+            _logger.warning(f"No se pudo parsear fecha Continental: {date_str}")
+            return None
+            
+        except Exception as e:
+            _logger.warning(f"Error parseando fecha Continental '{date_str}': {str(e)}")
+            return None
+
+    def _parse_continental_amount(self, amount_str):
+        """Parsear monto del formato Continental"""
+        if not amount_str:
+            return 0.0
+        
+        try:
+            # Limpiar el formato: remover comas, espacios extra
+            clean_amount = str(amount_str).replace(',', '').replace(' ', '').strip()
+            
+            _logger.info(f"Parseando monto Continental: '{amount_str}' -> '{clean_amount}'")
+            
+            # Manejar casos vacíos
+            if not clean_amount or clean_amount == '':
+                return 0.0
+                
+            result = float(clean_amount)
+            _logger.info(f"Monto parseado: {amount_str} -> {result}")
+            return result
+            
+        except Exception as e:
+            _logger.warning(f"No se pudo parsear monto Continental '{amount_str}': {str(e)}")
+            return 0.0
 
 class BankImportLine(models.Model):
     _name = 'bank.import.line'
